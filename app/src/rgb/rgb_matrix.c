@@ -107,6 +107,54 @@ rgb_task_states rgb_task_state = RGB_STATE_SYNC;
 
 static uint32_t rgb_timer_bak;
 
+// --- OpenRGB direct control (ZMK issue #893) -------------------------------
+// While active, zmk_rgb_task_render() is bypassed so the colors the host writes
+// via zmk_rgb_matrix_set_color() are kept and flushed unchanged.
+void os_state_indicate(void); // lock (caps/num) indicator overlay, defined in keychron_rgb.c
+static bool rgb_openrgb_direct = false;
+static rgb_config_t openrgb_saved_config;
+
+static void openrgb_handback_cb(struct k_work *work);
+static K_WORK_DELAYABLE_DEFINE(openrgb_handback_work, openrgb_handback_cb);
+#define OPENRGB_HANDBACK_MS 3000
+
+bool zmk_rgb_matrix_openrgb_active(void) { return rgb_openrgb_direct; }
+
+void zmk_rgb_matrix_openrgb_enter(void) {
+    if (!rgb_openrgb_direct) {
+        // Snapshot the current onboard lighting so we can restore it on hand-back.
+        openrgb_saved_config = rgb_matrix_config;
+        rgb_openrgb_direct = true;
+        // Keep the LEDs powered; leave mode untouched so the effect-transition
+        // machinery isn't triggered (render is bypassed anyway).
+        rgb_matrix_config.enable = 1;
+    }
+    k_work_reschedule(&openrgb_handback_work, K_MSEC(OPENRGB_HANDBACK_MS));
+}
+
+void zmk_rgb_matrix_openrgb_exit(void) {
+    if (rgb_openrgb_direct) {
+        rgb_openrgb_direct = false;
+        // Graceful hand-back: restore the exact onboard effect/color/brightness.
+        rgb_matrix_config = openrgb_saved_config;
+        rgb_last_effect = 0; // force the restored effect to re-init cleanly
+    }
+    k_work_cancel_delayable(&openrgb_handback_work);
+}
+
+void zmk_rgb_matrix_openrgb_feed(void) {
+    if (rgb_openrgb_direct) {
+        k_work_reschedule(&openrgb_handback_work, K_MSEC(OPENRGB_HANDBACK_MS));
+    }
+}
+
+static void openrgb_handback_cb(struct k_work *work) {
+    // No OpenRGB frames for OPENRGB_HANDBACK_MS (host quit / USB unplug / switch
+    // to BLE or 2.4GHz) -> return control to the onboard effect.
+    zmk_rgb_matrix_openrgb_exit();
+}
+// ---------------------------------------------------------------------------
+
 static last_hit_t last_hit_buffer;
 
 uint8_t rgb_onoff_status;
@@ -236,6 +284,14 @@ static void zmk_rgb_task_start(void) {
 static void zmk_rgb_task_render(uint8_t effect) {
     bool rendering = false;
 
+    // OpenRGB direct mode: the host owns the LED buffer. Skip all effect
+    // rendering so its colors persist, and just flush what it set. Suspend
+    // still wins (LEDs off on sleep to save battery).
+    if (rgb_openrgb_direct && !suspend_state) {
+        rgb_task_state = RGB_STATE_FLUSH;
+        return;
+    }
+
     rgb_effect_params.init =
         (effect != rgb_last_effect) || (rgb_matrix_config.enable != rgb_last_enable);
 
@@ -340,7 +396,11 @@ void zmk_rgb_matrix_task(void) {
         break;
     case RGB_STATE_RENDER:
         zmk_rgb_task_render(effect);
-        if (effect) {
+        if (rgb_openrgb_direct) {
+            // OpenRGB owns the keys, but overlay the OS lock indicators (caps/num)
+            // on top so lock state stays visible while the host drives the rest.
+            os_state_indicate();
+        } else if (effect) { // don't let full indicators stomp host colors
             if (rgb_task_state == RGB_STATE_FLUSH) { // ensure we only draw basic indicators once
                                                      // rendering is finished
                 zmk_rgb_matrix_indicators();

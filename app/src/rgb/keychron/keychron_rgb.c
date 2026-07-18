@@ -442,6 +442,45 @@ void os_state_indicate(void) {
     (void)rgb;
 }
 
+/*
+ * True when `led` is currently being driven as an OS lock indicator (caps/num/
+ * etc. active and not user-disabled). The OpenRGB direct path uses this to skip
+ * those keys, so os_state_indicate() is the sole writer for them and the host's
+ * per-frame writes can't race the overlay (which caused visible flicker).
+ * Conditions must stay in lockstep with os_state_indicate() above.
+ */
+bool os_indicator_owns_led(uint16_t led) {
+#if defined(NUM_LOCK_INDEX)
+    if (led == NUM_LOCK_INDEX && keyboard_get_led_state().num_lock && !os_ind_cfg.disable.num_lock) {
+        return true;
+    }
+#endif
+#if defined(CAPS_LOCK_INDEX)
+    if (led == CAPS_LOCK_INDEX && keyboard_get_led_state().caps_lock &&
+        !os_ind_cfg.disable.caps_lock) {
+        return true;
+    }
+#endif
+#if defined(SCROLL_LOCK_INDEX)
+    if (led == SCROLL_LOCK_INDEX && keyboard_get_led_state().scroll_lock &&
+        !os_ind_cfg.disable.scroll_lock) {
+        return true;
+    }
+#endif
+#if defined(COMPOSE_LOCK_INDEX)
+    if (led == COMPOSE_LOCK_INDEX && keyboard_get_led_state().compose &&
+        !os_ind_cfg.disable.compose) {
+        return true;
+    }
+#endif
+#if defined(KANA_LOCK_INDEX)
+    if (led == KANA_LOCK_INDEX && keyboard_get_led_state().kana && !os_ind_cfg.disable.kana) {
+        return true;
+    }
+#endif
+    return false;
+}
+
 extern snap_click_config_t snap_click_pair[SNAP_CLICK_COUNT];
 
 static int keychron_handle_set(const char *name, size_t len, settings_read_cb read_cb,

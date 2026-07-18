@@ -1328,6 +1328,12 @@ void raw_hid_receive(uint8_t *data, uint8_t length) {
         }
         break;
 #endif
+#if IS_ENABLED(CONFIG_ZMK_OPENRGB)
+    case id_openrgb: {
+        openrgb_handle_command(data, length);
+        break;
+    }
+#endif
     default: {
         // The command ID is not known
         // Return the unhandled state

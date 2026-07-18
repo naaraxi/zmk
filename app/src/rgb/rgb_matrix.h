@@ -78,6 +78,21 @@ bool zmk_rgb_matrix_indicators_advanced_user(uint8_t led_min, uint8_t led_max);
 
 void zmk_rgb_matrix_reload_from_eeprom(void);
 
+// --- OpenRGB direct control (ZMK issue #893) ---
+// The host (OpenRGB) takes over the LED buffer over the raw-HID channel; the
+// effect renderer is suppressed so host-set colors persist, and control is
+// auto-handed-back to the saved onboard effect after a short idle (host quit /
+// USB unplug / switch to BLE or 2.4GHz).
+void zmk_rgb_matrix_openrgb_enter(void);
+void zmk_rgb_matrix_openrgb_exit(void);
+void zmk_rgb_matrix_openrgb_feed(void);
+bool zmk_rgb_matrix_openrgb_active(void);
+
+// True while `led` is being driven as an active OS lock indicator (caps/num/
+// etc.). The OpenRGB direct path skips these so the lock overlay owns them and
+// the host's writes can't race it (defined in keychron_rgb.c).
+bool os_indicator_owns_led(uint16_t led);
+
 void zmk_rgb_matrix_set_suspend_state(bool state);
 bool zmk_rgb_matrix_get_suspend_state(void);
 void zmk_rgb_matrix_toggle(void);

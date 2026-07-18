@@ -672,6 +672,11 @@ if ZMK_LAUNCHER
 config LAUNCHER_USER_SET_DEBOUNCE
     bool "enable user set bebouce"
     default n
+
+config ZMK_OPENRGB
+    bool "OpenRGB direct RGB control over raw HID (ZMK issue #893)"
+    depends on LED_STRIP
+    default y
 endif
 
 config ZMK_SSD1306

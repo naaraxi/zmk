@@ -82,6 +82,8 @@ enum launcher_command_id {
     id_dynamic_keymap_get_encoder = 0x14,
     id_dynamic_keymap_set_encoder = 0x15,
 
+    id_openrgb = 0x16, // OpenRGB direct RGB control (ZMK issue #893)
+
     kc_get_protocol_version = 0xa0,
     kc_get_firmware_version = 0xa1, // ascii ver
     kc_get_support_feature = 0xa2,
@@ -92,6 +94,10 @@ enum launcher_command_id {
 
     id_unhandled = 0xFF,
 };
+
+// OpenRGB direct-control command handler (src/launcher/openrgb.c).
+void openrgb_handle_command(uint8_t *data, uint8_t length);
+
 enum {
     FEATURE_DEFAULT_LAYER = 0x01 << 0,
     FEATURE_BLUETOOTH = 0x01 << 1,
