@@ -16,7 +16,7 @@ keyboard goes wireless, control auto-hands-back to your onboard/Launcher
 lighting after ~3 s. Caps/Num-Lock indicators stay visible on top.
 
 The matching OpenRGB plugin lives in a separate repo:
-**https://github.com/naaraxi/keychron_v6u_openrgb**
+**https://github.com/naaraxi/keychron_ultra_openrgb**
 
 ## What changed (vs upstream `rtl8762g`)
 - `app/src/launcher/openrgb.c` - the 0x16 command handler.
