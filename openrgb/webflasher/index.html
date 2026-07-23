@@ -139,8 +139,7 @@ const CHUNK = 16;
 const OP = { GET_MODEL:0x60, GET_DFU_VER:0x61, START:0x63, SEND_BIN:0x64, VERIFY:0x65, SWITCH:0x66 };
 
 // Reflected CRC32, poly 0xEDB88320, init 0xFFFFFFFF, NO final xor (matches tdfu.c / flash.py).
-function crc32rtk(buf) {
-  let crc = 0xffffffff >>> 0;
+function crc32step(crc, buf) {
   for (let i = 0; i < buf.length; i++) {
     let t = (crc ^ buf[i]) & 0xff;
     for (let k = 0; k < 8; k++) t = (t & 1) ? ((t >>> 1) ^ 0xedb88320) >>> 0 : (t >>> 1);
@@ -148,6 +147,8 @@ function crc32rtk(buf) {
   }
   return crc >>> 0;
 }
+function crc32rtk(buf) { return crc32step(0xffffffff >>> 0, buf); }
+const hex8 = (n) => '0x' + (n >>> 0).toString(16).padStart(8, '0');
 
 // Build the 32-byte payload (report id is passed separately to sendReport).
 function buildPacket(opcode, data, sn) {
@@ -294,16 +295,27 @@ createApp({
 
         phase.value = 'Uploading';
         let sn = 4;
+        let running = 0xffffffff >>> 0;   // expected on-device running CRC
         const total = Math.ceil(data.length / CHUNK);
         for (let i = 0, c = 0; i < data.length; i += CHUNK, c++) {
           const chunk = data.slice(i, i + CHUNK);
           const ack = await cmd(OP.SEND_BIN, chunk, sn);
           if (!ack) throw new Error(`no ack at chunk ${c}/${total} (sn=${sn})`);
+
+          // The device echoes its running CRC in the SEND_BIN ack (payload bytes
+          // 9..12, LE). Compare it to what we expect to catch the exact chunk
+          // where the keyboard's received data diverges from what we sent.
+          running = crc32step(running, chunk);
+          const devCrc = (ack[9] | (ack[10] << 8) | (ack[11] << 16) | (ack[12] << 24)) >>> 0;
+          if (c === 0) log(`chunk 0 ack: ${Array.from(ack.slice(0, 16)).map(b => b.toString(16).padStart(2,'0')).join(' ')}`);
+          if (devCrc !== running) {
+            throw new Error(`data mismatch at chunk ${c} (sn=${sn}): device running CRC ${hex8(devCrc)} != expected ${hex8(running)} - the keyboard received different bytes than were sent`);
+          }
           sn = sn >= 255 ? 1 : sn + 1;
           if (c % 32 === 0) { progress.value = Math.round((c / total) * 100); }
         }
         progress.value = 100;
-        log(`Uploaded ${total} chunks.`);
+        log(`Uploaded ${total} chunks; on-device running CRC matched expected ${hex8(running)} throughout.`);
 
         phase.value = 'Verifying';
         const vdata = new Uint8Array(8);
