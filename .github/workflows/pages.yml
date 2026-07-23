@@ -11,8 +11,9 @@ on:
     paths:
       - 'openrgb/webflasher/**'
       - '.github/workflows/pages.yml'
-  release:
-    types: [published]
+  workflow_run:
+    workflows: ["release-firmware"]
+    types: [completed]
   workflow_dispatch:
 
 permissions:
