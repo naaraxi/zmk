@@ -94,13 +94,10 @@
       <div class="row">
         <button class="secondary" @click="connect" :disabled="flashing">Connect &amp; identify</button>
         <span v-if="model" :class="modelOk ? 'ok' : 'muted'">
-          Detected: <strong>{{ model }}</strong>
-          <template v-if="fwType"> - <strong :class="fwType === 'OpenRGB' ? 'ok' : ''">{{ fwType }} firmware</strong></template>
-          <template v-if="fwVersion"> {{ fwVersion }}</template>
+          Detected: <strong>{{ model }}</strong><template v-if="fwVersion"> - firmware {{ fwVersion }}</template>
           <template v-if="!modelOk"> (not a recognized Keychron Ultra)</template>
         </span>
       </div>
-      <p v-if="fwCheckError" class="hint" style="margin:.4rem 0 0">OpenRGB check: {{ fwCheckError }}</p>
     </div>
 
     <!-- Step 3: flash -->
@@ -178,8 +175,6 @@ createApp({
     const model = ref('');
     const modelOk = ref(false);
     const fwVersion = ref('');
-    const fwType = ref('');           // '', 'OpenRGB', 'Stock'
-    const fwCheckError = ref('');
     const flashing = ref(false);
     const phase = ref('');
     const progress = ref(0);
@@ -278,38 +273,9 @@ createApp({
         fwVersion.value = asStr(payload.slice(12, 22));
         modelOk.value = /^KCZK..8K$/.test(model.value);
         log(`Identified: ${model.value}${fwVersion.value ? ' firmware ' + fwVersion.value : ''}`);
-
-        // Same device, no second prompt: probe OpenRGB-vs-stock if 0xFF60 is exposed.
-        await probeFirmwareType(dev);
       } catch (e) {
         log('Connect failed: ' + e.message);
       }
-    }
-
-    // OpenRGB-vs-stock lives on the 0xFF60 raw-HID collection. If the connected
-    // device exposes it (same physical keyboard), probe 0x16 GET_LED_COUNT on it:
-    // custom firmware answers with a count, stock firmware does not. No second
-    // prompt - reuses the already-connected device.
-    async function probeFirmwareType(dev) {
-      fwType.value = ''; fwCheckError.value = '';
-      const colls = dev.collections || [];
-      log('HID collections: ' + (colls.map(c => '0x' + (c.usagePage >>> 0).toString(16)).join(', ') || '(none reported)'));
-      const raw = colls.find(c => c.usagePage === 0xff60);
-      if (!raw) { fwCheckError.value = 'OpenRGB interface (0xFF60) not exposed on this device handle'; return; }
-      const outId = (raw.outputReports && raw.outputReports[0]) ? raw.outputReports[0].reportId : 0x00;
-      const count = await new Promise((resolve) => {
-        const onRep = (e) => {
-          const b = new Uint8Array(e.data.buffer, e.data.byteOffset, e.data.byteLength);
-          if (b[0] === 0x16) { cleanup(); resolve((b[2] | (b[3] << 8)) >>> 0); }
-        };
-        const timer = setTimeout(() => { cleanup(); resolve(0); }, 800);
-        function cleanup() { clearTimeout(timer); dev.removeEventListener('inputreport', onRep); }
-        dev.addEventListener('inputreport', onRep);
-        const pkt = new Uint8Array(32); pkt[0] = 0x16; pkt[1] = 0x01;   // OPENRGB_CMD, GET_LED_COUNT
-        dev.sendReport(outId, pkt).catch((e) => { cleanup(); fwCheckError.value = e.message; resolve(0); });
-      });
-      fwType.value = count > 0 ? 'OpenRGB' : 'Stock';
-      log(`Firmware type: ${fwType.value}${count > 0 ? ` (${count} LEDs)` : ' (no OpenRGB response)'}`);
     }
 
     async function doFlash() {
@@ -379,7 +345,7 @@ createApp({
     watch(selectedAssetName, (v) => { if (v) loadReleaseAsset(v); });
 
     return { hidSupported, secure, releasesLoading, assets, releaseTag, selectedAssetName,
-             firmware, loadError, device, model, modelOk, fwVersion, fwType, fwCheckError, flashing, phase, progress, logLines,
+             firmware, loadError, device, model, modelOk, fwVersion, flashing, phase, progress, logLines,
              canFlash, prettyName, onFilePick, connect, doFlash };
   }
 }).mount('#app');
