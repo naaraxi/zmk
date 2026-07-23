@@ -94,9 +94,8 @@
       <div class="row">
         <button class="secondary" @click="connect" :disabled="flashing">Connect &amp; identify</button>
         <span v-if="model" :class="modelOk ? 'ok' : 'muted'">
-          Detected: <strong>{{ model }}</strong>
-          <template v-if="modelOk"> (OpenRGB firmware OK)</template>
-          <template v-else> - not a recognized Keychron Ultra OpenRGB device</template>
+          Detected: <strong>{{ model }}</strong><template v-if="fwVersion"> - firmware {{ fwVersion }}</template>
+          <template v-if="!modelOk"> (not a recognized Keychron Ultra)</template>
         </span>
       </div>
     </div>
@@ -175,6 +174,7 @@ createApp({
     const device = ref(null);
     const model = ref('');
     const modelOk = ref(false);
+    const fwVersion = ref('');
     const flashing = ref(false);
     const phase = ref('');
     const progress = ref(0);
@@ -266,12 +266,13 @@ createApp({
         log(`Connected: ${dev.productName || 'HID device'}`);
         // Identify (read-only).
         const r = await cmd(OP.GET_MODEL, [], 1);
-        if (!r) { model.value = ''; modelOk.value = false; log('No response to GET_MODEL_INFO - wrong device or firmware.'); return; }
+        if (!r) { model.value = ''; modelOk.value = false; fwVersion.value = ''; log('No response to GET_MODEL_INFO - wrong device or firmware.'); return; }
         const payload = r.slice(9);
-        const nul = payload.indexOf(0);
-        model.value = new TextDecoder().decode(payload.slice(0, nul < 0 ? 10 : Math.min(nul, 10)));
+        const asStr = (b) => { const n = b.indexOf(0); return new TextDecoder().decode(b.slice(0, n < 0 ? b.length : n)).trim(); };
+        model.value = asStr(payload.slice(0, 10));
+        fwVersion.value = asStr(payload.slice(12, 22));
         modelOk.value = /^KCZK..8K$/.test(model.value);
-        log(`Identified model: ${model.value} (${modelOk.value ? 'OpenRGB firmware' : 'unrecognized'})`);
+        log(`Identified: ${model.value}${fwVersion.value ? ' firmware ' + fwVersion.value : ''}`);
       } catch (e) {
         log('Connect failed: ' + e.message);
       }
@@ -344,7 +345,7 @@ createApp({
     watch(selectedAssetName, (v) => { if (v) loadReleaseAsset(v); });
 
     return { hidSupported, secure, releasesLoading, assets, releaseTag, selectedAssetName,
-             firmware, loadError, device, model, modelOk, flashing, phase, progress, logLines,
+             firmware, loadError, device, model, modelOk, fwVersion, flashing, phase, progress, logLines,
              canFlash, prettyName, onFilePick, connect, doFlash };
   }
 }).mount('#app');
