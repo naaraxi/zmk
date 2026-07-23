@@ -67,10 +67,16 @@ the RTK_DFU option the Ultra shields need), and the build dir must be
 
 ## Flash
 
-The Keychron Launcher only flashes official images, so use the included host
-flasher (Realtek SC-FWU over /dev/hidraw, needs root). Plug the keyboard in via
-USB, then run the flasher on the built image. See `openrgb/README.md` for the
-exact flash command, recovery steps, and the DFU bootloader details.
+Easiest: the browser flasher at https://naaraxi.github.io/zmk/ - open it in
+Chrome or Edge, connect the keyboard over USB, pick your board's firmware (or
+upload your own `.bin`), and flash. No install, and it works on Windows, macOS,
+and Linux. It talks to the keyboard over WebHID, so a Chromium-based browser is
+required (Firefox and Safari do not support WebHID).
+
+Alternatively, on Linux you can use the command-line flasher `openrgb/flash.py`
+(Realtek SC-FWU over /dev/hidraw, needs root). The Keychron Launcher only flashes
+official images, so it cannot flash these builds. See `openrgb/README.md` for the
+CLI flasher, recovery steps, and the DFU bootloader details.
 
 ## More
 

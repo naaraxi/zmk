@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Keychron Ultra OpenRGB Firmware Flasher</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    background: #0f1115; color: #e6e8eb;
+    display: flex; justify-content: center; padding: 2rem 1rem;
+  }
+  main { width: 100%; max-width: 720px; }
+  h1 { font-size: 1.4rem; margin: 0 0 .25rem; }
+  .sub { color: #9aa4b2; margin: 0 0 1.5rem; }
+  .card { background: #171a21; border: 1px solid #262b36; border-radius: 12px; padding: 1.25rem; margin-bottom: 1rem; }
+  .card h2 { font-size: .8rem; text-transform: uppercase; letter-spacing: .06em; color: #8b93a1; margin: 0 0 .75rem; }
+  label { display: block; font-size: .85rem; color: #9aa4b2; margin-bottom: .35rem; }
+  select, input[type=file] { width: 100%; padding: .6rem .7rem; background: #0f1115; color: #e6e8eb; border: 1px solid #2c3340; border-radius: 8px; }
+  .row { display: flex; gap: .75rem; flex-wrap: wrap; align-items: center; }
+  button {
+    appearance: none; border: 0; border-radius: 8px; padding: .65rem 1.1rem;
+    font-size: .95rem; font-weight: 600; cursor: pointer; background: #3b82f6; color: #fff;
+  }
+  button.secondary { background: #2c3340; color: #e6e8eb; }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  .hint { font-size: .82rem; color: #8b93a1; }
+  .warn { background: #2a1e12; border-color: #5a3a17; color: #f4c789; }
+  .err  { background: #2a1416; border-color: #5c2126; color: #f2a0a6; }
+  .ok   { color: #6ee7a8; }
+  .pill { display: inline-block; font-size: .78rem; padding: .1rem .5rem; border-radius: 999px; background: #23303f; color: #8fb7e8; }
+  progress { width: 100%; height: 10px; }
+  pre.log {
+    background: #0b0d11; border: 1px solid #222834; border-radius: 8px; padding: .75rem;
+    max-height: 220px; overflow: auto; font: 12.5px/1.5 ui-monospace, Menlo, Consolas, monospace;
+    white-space: pre-wrap; margin: .5rem 0 0;
+  }
+  a { color: #7fb0f0; }
+  .muted { color: #8b93a1; }
+</style>
+</head>
+<body>
+<main id="app">
+  <h1>Keychron Ultra OpenRGB Firmware Flasher</h1>
+  <p class="sub">Flash the custom ZMK / OpenRGB firmware to a Keychron Ultra keyboard, right from your browser. USB only.</p>
+
+  <!-- Unsupported browser -->
+  <div v-if="!hidSupported" class="card err">
+    <h2 style="color:inherit">Browser not supported</h2>
+    <p style="margin:0">
+      This flasher uses <strong>WebHID</strong>, which only works in Chromium-based desktop browsers.
+      Please open this page in <strong>Google Chrome</strong>, <strong>Microsoft Edge</strong>,
+      or another Chromium browser (Brave, Opera, Vivaldi). Firefox and Safari do not support WebHID.
+    </p>
+    <p v-if="!secure" style="margin:.75rem 0 0">
+      (This page must also be served over HTTPS for WebHID to work.)
+    </p>
+  </div>
+
+  <template v-else>
+    <!-- Step 1: choose firmware -->
+    <div class="card">
+      <h2>1. Choose firmware</h2>
+
+      <label>Official release build</label>
+      <div class="row">
+        <select v-model="selectedAssetName" :disabled="flashing || releasesLoading" style="flex:1;min-width:220px">
+          <option value="">{{ releasesLoading ? 'Loading releases...' : (assets.length ? 'Select your keyboard...' : 'No release assets found') }}</option>
+          <option v-for="a in assets" :key="a.name" :value="a.name">{{ prettyName(a.name) }} ({{ (a.size/1024).toFixed(0) }} KB)</option>
+        </select>
+        <span v-if="releaseTag" class="pill">{{ releaseTag }}</span>
+      </div>
+      <p class="hint" style="margin:.5rem 0 0">
+        Not sure which one? It matches your keyboard model (for example the Q6 Ultra uses
+        <code>keychron_q6_ultra_ansi</code>).
+      </p>
+
+      <label style="margin-top:1rem">Or upload your own <code>.bin</code> (if you built it yourself)</label>
+      <input type="file" accept=".bin" @change="onFilePick" :disabled="flashing">
+
+      <p v-if="firmware" class="hint ok" style="margin:.6rem 0 0">
+        Loaded: <strong>{{ firmware.name }}</strong> - {{ firmware.bytes.length }} bytes,
+        CRC32 <code>0x{{ firmware.crc.toString(16).padStart(8,'0') }}</code>
+      </p>
+      <p v-if="loadError" class="hint" style="color:#f2a0a6;margin:.6rem 0 0">{{ loadError }}</p>
+    </div>
+
+    <!-- Step 2: connect -->
+    <div class="card">
+      <h2>2. Connect the keyboard</h2>
+      <p class="hint" style="margin-top:0">Plug the keyboard in over <strong>USB</strong> (not wireless), then connect and identify it. This step is read-only.</p>
+      <div class="row">
+        <button class="secondary" @click="connect" :disabled="flashing">Connect &amp; identify</button>
+        <span v-if="model" :class="modelOk ? 'ok' : 'muted'">
+          Detected: <strong>{{ model }}</strong>
+          <template v-if="modelOk"> (OpenRGB firmware OK)</template>
+          <template v-else> - not a recognized Keychron Ultra OpenRGB device</template>
+        </span>
+      </div>
+    </div>
+
+    <!-- Step 3: flash -->
+    <div class="card">
+      <h2>3. Flash</h2>
+      <div class="row">
+        <button @click="doFlash" :disabled="!canFlash">{{ flashing ? 'Flashing...' : 'Flash firmware' }}</button>
+        <span v-if="phase" class="muted">{{ phase }}</span>
+      </div>
+      <progress v-if="flashing || progress>0" :value="progress" max="100" style="margin-top:.9rem"></progress>
+      <pre v-if="logLines.length" class="log">{{ logLines.join('\n') }}</pre>
+    </div>
+
+    <div class="card warn">
+      <h2 style="color:inherit">Before you flash</h2>
+      <ul style="margin:.25rem 0 0;padding-left:1.2rem">
+        <li>Use the firmware that matches your exact keyboard model.</li>
+        <li>The upload is staged and CRC-verified on-device; it only activates after verification, so an interrupted or bad upload will not brick the board (it keeps running the current firmware).</li>
+        <li>Only the V6 Ultra layout is hardware-verified today; other boards are built from firmware but untested - see the repo README.</li>
+      </ul>
+    </div>
+  </template>
+
+  <p class="hint muted" style="text-align:center">
+    Source and firmware: <a href="https://github.com/naaraxi/zmk" target="_blank" rel="noopener">github.com/naaraxi/zmk</a>
+    &middot; Beta - please report issues.
+  </p>
+</main>
+
+<script type="module">
+import { createApp, ref, computed, onMounted, watch } from 'https://unpkg.com/vue@3/dist/vue.esm-browser.prod.js';
+
+const VENDOR_ID = 0x3434;
+const DFU_USAGE_PAGE = 0x8c;
+const OUT_REPORT_ID = 0xb2;
+const IN_REPORT_ID  = 0xb1;
+const REPORT_LEN = 32;
+const CHUNK = 16;
+const OP = { GET_MODEL:0x60, GET_DFU_VER:0x61, START:0x63, SEND_BIN:0x64, VERIFY:0x65, SWITCH:0x66 };
+const REPO = 'naaraxi/zmk';
+
+// Reflected CRC32, poly 0xEDB88320, init 0xFFFFFFFF, NO final xor (matches tdfu.c / flash.py).
+function crc32rtk(buf) {
+  let crc = 0xffffffff >>> 0;
+  for (let i = 0; i < buf.length; i++) {
+    let t = (crc ^ buf[i]) & 0xff;
+    for (let k = 0; k < 8; k++) t = (t & 1) ? ((t >>> 1) ^ 0xedb88320) >>> 0 : (t >>> 1);
+    crc = ((crc >>> 8) ^ t) >>> 0;
+  }
+  return crc >>> 0;
+}
+
+// Build the 32-byte payload (report id is passed separately to sendReport).
+function buildPacket(opcode, data, sn) {
+  const pkt = new Uint8Array(REPORT_LEN);
+  const len = data.length + 3;
+  pkt[0] = 0xaa; pkt[1] = 0x56; pkt[2] = len & 0xff; pkt[3] = (~len) & 0xff; pkt[4] = sn & 0xff; pkt[5] = opcode;
+  pkt.set(data, 6);
+  let s = opcode; for (const b of data) s += b; s &= 0xffff;
+  pkt[6 + data.length] = s & 0xff;
+  pkt[7 + data.length] = (s >> 8) & 0xff;
+  return pkt;
+}
+
+createApp({
+  setup() {
+    const hidSupported = ref('hid' in navigator);
+    const secure = ref(window.isSecureContext);
+    const releasesLoading = ref(false);
+    const assets = ref([]);
+    const releaseTag = ref('');
+    const selectedAssetName = ref('');
+    const firmware = ref(null);      // { name, bytes:Uint8Array, crc }
+    const loadError = ref('');
+    const device = ref(null);
+    const model = ref('');
+    const modelOk = ref(false);
+    const flashing = ref(false);
+    const phase = ref('');
+    const progress = ref(0);
+    const logLines = ref([]);
+    let pending = null;              // resolver for the next input report
+
+    const log = (m) => { logLines.value.push(m); };
+    const canFlash = computed(() => !!firmware.value && !!device.value && modelOk.value && !flashing.value);
+
+    const prettyName = (n) => n.replace(/^keychron_/, '').replace(/_ansi$/, '').replace(/_/g, ' ').replace(/\.bin$/, '') + '.bin';
+
+    onMounted(async () => {
+      if (!hidSupported.value) return;
+      releasesLoading.value = true;
+      try {
+        const res = await fetch(`https://api.github.com/repos/${REPO}/releases/latest`);
+        if (res.ok) {
+          const rel = await res.json();
+          releaseTag.value = rel.tag_name;
+          assets.value = (rel.assets || []).filter(a => a.name.endsWith('.bin'))
+            .map(a => ({ name: a.name, size: a.size, url: a.browser_download_url }));
+        }
+      } catch (e) { /* releases optional; local upload still works */ }
+      releasesLoading.value = false;
+    });
+
+    async function loadReleaseAsset(name) {
+      const a = assets.value.find(x => x.name === name);
+      if (!a) return;
+      loadError.value = ''; firmware.value = null;
+      try {
+        const res = await fetch(a.url);
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        const bytes = new Uint8Array(await res.arrayBuffer());
+        firmware.value = { name: a.name, bytes, crc: crc32rtk(bytes) };
+      } catch (e) {
+        loadError.value = `Could not download ${name} in-browser (${e.message}). Download it from the Releases page and use the upload option below.`;
+      }
+    }
+
+    function onFilePick(ev) {
+      const f = ev.target.files[0];
+      if (!f) return;
+      loadError.value = '';
+      const r = new FileReader();
+      r.onload = () => {
+        const bytes = new Uint8Array(r.result);
+        firmware.value = { name: f.name, bytes, crc: crc32rtk(bytes) };
+      };
+      r.readAsArrayBuffer(f);
+    }
+
+    // Wait for the next 0xB1 input report (Uint8Array of REPORT_LEN), or null on timeout.
+    function waitReport(timeout = 1000) {
+      return new Promise((resolve) => {
+        const t = setTimeout(() => { pending = null; resolve(null); }, timeout);
+        pending = (data) => { clearTimeout(t); pending = null; resolve(data); };
+      });
+    }
+
+    function onInputReport(e) {
+      if (e.reportId !== IN_REPORT_ID) return;
+      const d = new Uint8Array(e.data.buffer, e.data.byteOffset, e.data.byteLength);
+      if (pending) pending(d);
+    }
+
+    async function cmd(opcode, data = [], sn = 0, timeout = 1000) {
+      const p = waitReport(timeout);
+      await device.value.sendReport(OUT_REPORT_ID, buildPacket(opcode, Uint8Array.from(data), sn));
+      return p;
+    }
+
+    async function connect() {
+      try {
+        const filters = [{ vendorId: VENDOR_ID, usagePage: DFU_USAGE_PAGE }];
+        const devs = await navigator.hid.requestDevice({ filters });
+        if (!devs.length) return;
+        const dev = devs[0];
+        if (!dev.opened) await dev.open();
+        dev.addEventListener('inputreport', onInputReport);
+        device.value = dev;
+        log(`Connected: ${dev.productName || 'HID device'}`);
+        // Identify (read-only).
+        const r = await cmd(OP.GET_MODEL, [], 1);
+        if (!r) { model.value = ''; modelOk.value = false; log('No response to GET_MODEL_INFO - wrong device or firmware.'); return; }
+        const payload = r.slice(9);
+        const nul = payload.indexOf(0);
+        model.value = new TextDecoder().decode(payload.slice(0, nul < 0 ? 10 : Math.min(nul, 10)));
+        modelOk.value = /^KCZK..8K$/.test(model.value);
+        log(`Identified model: ${model.value} (${modelOk.value ? 'OpenRGB firmware' : 'unrecognized'})`);
+      } catch (e) {
+        log('Connect failed: ' + e.message);
+      }
+    }
+
+    async function doFlash() {
+      if (!canFlash.value) return;
+      flashing.value = true; progress.value = 0; phase.value = ''; logLines.value = [];
+      const data = firmware.value.bytes;
+      const crc = firmware.value.crc;
+      try {
+        log(`Flashing ${firmware.value.name}: ${data.length} bytes, crc32=0x${crc.toString(16).padStart(8,'0')}`);
+        // Re-handshake to be safe.
+        phase.value = 'Handshake';
+        let r = await cmd(OP.GET_MODEL, [], 1);
+        if (!r) throw new Error('handshake failed (no GET_MODEL_INFO response)');
+        await cmd(OP.GET_DFU_VER, [], 2);
+
+        phase.value = 'Start';
+        r = await cmd(OP.START, [0x00], 3);
+        if (!r) throw new Error('START not acked');
+
+        phase.value = 'Uploading';
+        let sn = 4;
+        const total = Math.ceil(data.length / CHUNK);
+        for (let i = 0, c = 0; i < data.length; i += CHUNK, c++) {
+          const chunk = data.slice(i, i + CHUNK);
+          const ack = await cmd(OP.SEND_BIN, chunk, sn);
+          if (!ack) throw new Error(`no ack at chunk ${c}/${total} (sn=${sn})`);
+          sn = sn >= 255 ? 1 : sn + 1;
+          if (c % 32 === 0) { progress.value = Math.round((c / total) * 100); }
+        }
+        progress.value = 100;
+        log(`Uploaded ${total} chunks.`);
+
+        phase.value = 'Verifying';
+        const vdata = new Uint8Array(8);
+        vdata[0] = crc & 0xff; vdata[1] = (crc >>> 8) & 0xff; vdata[2] = (crc >>> 16) & 0xff; vdata[3] = (crc >>> 24) & 0xff;
+        vdata.copyWithin(4, 0, 4);   // plaintext crc = ciphertext crc
+        r = await cmd(OP.VERIFY, vdata, sn, 3000);
+        sn = sn >= 255 ? 1 : sn + 1;
+        if (!r || r[9] !== 0) throw new Error(`CRC verify failed (status=${r ? r[9] : 'none'}) - NOT switching, current firmware untouched`);
+        log('CRC verified OK by device.');
+
+        phase.value = 'Switching image';
+        await device.value.sendReport(OUT_REPORT_ID, buildPacket(OP.SWITCH, new Uint8Array(0), sn));
+        await new Promise(res => setTimeout(res, 300));
+        phase.value = 'Done';
+        log('Image switch sent. The keyboard will reboot into the new firmware.');
+      } catch (e) {
+        phase.value = 'Failed';
+        log('ERROR: ' + e.message);
+      } finally {
+        flashing.value = false;
+      }
+    }
+
+    // React to release selection.
+    watch(selectedAssetName, (v) => { if (v) loadReleaseAsset(v); });
+
+    return { hidSupported, secure, releasesLoading, assets, releaseTag, selectedAssetName,
+             firmware, loadError, device, model, modelOk, flashing, phase, progress, logLines,
+             canFlash, prettyName, onFilePick, connect, doFlash };
+  }
+}).mount('#app');
+</script>
+</body>
+</html>
