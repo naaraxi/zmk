@@ -184,7 +184,14 @@ createApp({
     const log = (m) => { logLines.value.push(m); };
     const canFlash = computed(() => !!firmware.value && !!device.value && modelOk.value && !flashing.value);
 
-    const prettyName = (n) => n.replace(/^keychron_/, '').replace(/_ansi$/, '').replace(/_/g, ' ').replace(/\.bin$/, '') + '.bin';
+    // keychron_v6_ultra_ansi.bin -> "Keychron V6 Ultra 8K - ANSI"
+    const prettyName = (n) => {
+      const m = n.replace(/\.bin$/i, '').match(/^keychron_([a-z0-9]+)_ultra_(ansi|iso|jis)$/i);
+      if (!m) return n;
+      let model = m[1].toUpperCase();
+      if (model === 'Z270') model = 'Z2-70';
+      return `Keychron ${model} Ultra 8K - ${m[2].toUpperCase()}`;
+    };
 
     onMounted(async () => {
       if (!hidSupported.value) return;
