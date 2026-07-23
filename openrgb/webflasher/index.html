@@ -179,7 +179,7 @@ createApp({
     const phase = ref('');
     const progress = ref(0);
     const logLines = ref([]);
-    let pending = null;              // resolver for the next input report
+    let awaiting = null;             // { sn, opcode, resolve, timer } for the in-flight command
 
     const log = (m) => { logLines.value.push(m); };
     const canFlash = computed(() => !!firmware.value && !!device.value && modelOk.value && !flashing.value);
@@ -233,24 +233,25 @@ createApp({
       r.readAsArrayBuffer(f);
     }
 
-    // Wait for the next 0xB1 input report (Uint8Array of REPORT_LEN), or null on timeout.
-    function waitReport(timeout = 1000) {
-      return new Promise((resolve) => {
-        const t = setTimeout(() => { pending = null; resolve(null); }, timeout);
-        pending = (data) => { clearTimeout(t); pending = null; resolve(data); };
-      });
-    }
-
+    // Correlate each response to its request. The ack echoes the request's sn
+    // (payload byte 6) and opcode (byte 7); we only accept the report matching
+    // the in-flight command, so a stale/late report can't be mis-consumed.
     function onInputReport(e) {
-      if (e.reportId !== IN_REPORT_ID) return;
+      if (e.reportId !== IN_REPORT_ID || !awaiting) return;
       const d = new Uint8Array(e.data.buffer, e.data.byteOffset, e.data.byteLength);
-      if (pending) pending(d);
+      if (d[6] === awaiting.sn && d[7] === awaiting.opcode) {
+        const a = awaiting; awaiting = null; clearTimeout(a.timer); a.resolve(d);
+      }
+      // else: unmatched (stale) report - ignore.
     }
 
-    async function cmd(opcode, data = [], sn = 0, timeout = 1000) {
-      const p = waitReport(timeout);
-      await device.value.sendReport(OUT_REPORT_ID, buildPacket(opcode, Uint8Array.from(data), sn));
-      return p;
+    function cmd(opcode, data = [], sn = 0, timeout = 1000) {
+      return new Promise((resolve) => {
+        const timer = setTimeout(() => { awaiting = null; resolve(null); }, timeout);
+        awaiting = { sn: sn & 0xff, opcode, resolve, timer };
+        device.value.sendReport(OUT_REPORT_ID, buildPacket(opcode, Uint8Array.from(data), sn))
+          .catch(() => { clearTimeout(timer); awaiting = null; resolve(null); });
+      });
     }
 
     async function connect() {
