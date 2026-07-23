@@ -138,7 +138,6 @@ const IN_REPORT_ID  = 0xb1;
 const REPORT_LEN = 32;
 const CHUNK = 16;
 const OP = { GET_MODEL:0x60, GET_DFU_VER:0x61, START:0x63, SEND_BIN:0x64, VERIFY:0x65, SWITCH:0x66 };
-const REPO = 'naaraxi/zmk';
 
 // Reflected CRC32, poly 0xEDB88320, init 0xFFFFFFFF, NO final xor (matches tdfu.c / flash.py).
 function crc32rtk(buf) {
@@ -191,28 +190,27 @@ createApp({
       if (!hidSupported.value) return;
       releasesLoading.value = true;
       try {
-        const res = await fetch(`https://api.github.com/repos/${REPO}/releases/latest`);
+        // Firmware is bundled into this site at deploy time (see pages.yml), so
+        // it loads same-origin - no cross-origin/CORS fetch of release assets.
+        const res = await fetch('firmware/manifest.json', { cache: 'no-cache' });
         if (res.ok) {
-          const rel = await res.json();
-          releaseTag.value = rel.tag_name;
-          assets.value = (rel.assets || []).filter(a => a.name.endsWith('.bin'))
-            .map(a => ({ name: a.name, size: a.size, url: a.browser_download_url }));
+          const m = await res.json();
+          releaseTag.value = m.tag || '';
+          assets.value = (m.files || []);
         }
       } catch (e) { /* releases optional; local upload still works */ }
       releasesLoading.value = false;
     });
 
     async function loadReleaseAsset(name) {
-      const a = assets.value.find(x => x.name === name);
-      if (!a) return;
       loadError.value = ''; firmware.value = null;
       try {
-        const res = await fetch(a.url);
+        const res = await fetch('firmware/' + encodeURIComponent(name), { cache: 'no-cache' });
         if (!res.ok) throw new Error('HTTP ' + res.status);
         const bytes = new Uint8Array(await res.arrayBuffer());
-        firmware.value = { name: a.name, bytes, crc: crc32rtk(bytes) };
+        firmware.value = { name, bytes, crc: crc32rtk(bytes) };
       } catch (e) {
-        loadError.value = `Could not download ${name} in-browser (${e.message}). Download it from the Releases page and use the upload option below.`;
+        loadError.value = `Could not load ${name} (${e.message}). Try the upload option below.`;
       }
     }
 

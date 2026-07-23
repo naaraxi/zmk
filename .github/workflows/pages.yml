@@ -1,6 +1,8 @@
 name: pages
 
-# Deploys the browser firmware flasher (openrgb/webflasher) to GitHub Pages.
+# Deploys the browser firmware flasher (openrgb/webflasher) to GitHub Pages, and
+# bundles the latest firmware release's .bin files into the site so the page can
+# load them same-origin (GitHub release assets are not fetchable cross-origin).
 # Requires repo Settings > Pages > Source = "GitHub Actions".
 
 on:
@@ -9,6 +11,8 @@ on:
     paths:
       - 'openrgb/webflasher/**'
       - '.github/workflows/pages.yml'
+  release:
+    types: [published]
   workflow_dispatch:
 
 permissions:
@@ -28,6 +32,35 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Bundle latest firmware release (same-origin, no CORS)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          mkdir -p openrgb/webflasher/firmware
+          cd openrgb/webflasher/firmware
+          tag=$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName -q .tagName 2>/dev/null || true)
+          if [ -n "$tag" ]; then
+            echo "Bundling firmware from release $tag"
+            gh release download "$tag" --repo "$GITHUB_REPOSITORY" --pattern '*.bin' --dir . || true
+          else
+            echo "No release found; page will offer local upload only."
+          fi
+          {
+            printf '{\n  "tag": "%s",\n  "files": [' "$tag"
+            first=1
+            for f in *.bin; do
+              [ -e "$f" ] || continue
+              sz=$(stat -c%s "$f")
+              [ $first -eq 1 ] && printf '\n' || printf ',\n'
+              printf '    {"name": "%s", "size": %s}' "$f" "$sz"
+              first=0
+            done
+            printf '\n  ]\n}\n'
+          } > manifest.json
+          echo "=== manifest.json ==="; cat manifest.json
+
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

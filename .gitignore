@@ -14,3 +14,6 @@ __pycache__
 /app/pixel_b
 *.tar.gz
 
+
+# flasher firmware bundled at Pages-deploy time, never committed
+openrgb/webflasher/firmware/
