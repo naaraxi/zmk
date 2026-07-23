@@ -307,7 +307,7 @@ createApp({
           // 9..12, LE). Compare it to what we expect to catch the exact chunk
           // where the keyboard's received data diverges from what we sent.
           running = crc32step(running, chunk);
-          const devCrc = (ack[9] | (ack[10] << 8) | (ack[11] << 16) | (ack[12] << 24)) >>> 0;
+          const devCrc = (ack[10] | (ack[11] << 8) | (ack[12] << 16) | (ack[13] << 24)) >>> 0;
           if (c === 0) log(`chunk 0 ack: ${Array.from(ack.slice(0, 16)).map(b => b.toString(16).padStart(2,'0')).join(' ')}`);
           if (devCrc !== running) {
             throw new Error(`data mismatch at chunk ${c} (sn=${sn}): device running CRC ${hex8(devCrc)} != expected ${hex8(running)} - the keyboard received different bytes than were sent`);
