@@ -33,10 +33,22 @@ carry the per-key RGB matrix that OpenRGB drives:
 Two non-Ultra shields also build but have no per-key RGB matrix, so OpenRGB does
 not apply to them: `keychron_k3se2_ansi`, `keychron_k5se2_ansi`.
 
-## Build
+## Download (prebuilt firmware)
 
-Requires Docker (uses ZMK's CI toolchain image; nothing is installed on the
-host). From the repo root:
+You do not have to build anything. CI builds every shield above and attaches the
+OTA images to each release. Grab the one for your keyboard from the
+[latest release](https://github.com/naaraxi/zmk/releases/latest), named
+`<shield>.bin` (for example `keychron_v6_ultra_ansi.bin`), then flash it (see
+Flash below).
+
+Only the V6 Ultra has been tested on real hardware; the other boards' images are
+built from firmware but not hardware-verified. See the plugin repo's README for
+the full tested/untested breakdown.
+
+## Build it yourself (optional)
+
+If you would rather build from source, you need Docker (uses ZMK's CI toolchain
+image; nothing is installed on the host). From the repo root:
 
     ./openrgb/build.sh                          # default: keychron_v6_ultra_ansi
     ./openrgb/build.sh keychron_q6_ultra_ansi   # any shield from the table above

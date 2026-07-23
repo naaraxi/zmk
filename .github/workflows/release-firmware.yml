@@ -1,0 +1,85 @@
+name: release-firmware
+
+# Builds the OpenRGB firmware for every supported Keychron Ultra shield and,
+# on a v* tag, publishes the OTA images as a GitHub Release. Mirrors the plugin
+# repo's release flow. Trigger a build without releasing via "Run workflow".
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Build inside ZMK's CI toolchain image, exactly like openrgb/build.sh:
+      # west init/update once, then build each shield to app/build (the OTA
+      # post-build step hardcodes that path). Board is "keychron".
+      - name: Build all Ultra shields
+        run: |
+          mkdir -p dist
+          docker run --rm -e HOME=/tmp -v "$PWD":/workspaces/zmk -w /workspaces/zmk \
+            zmkfirmware/zmk-build-arm:3.5 bash -lc '
+              set -e
+              git config --global --add safe.directory /workspaces/zmk
+              if [ ! -d zephyr ] || [ ! -d modules ]; then
+                echo ">> initializing west workspace"
+                west init -l app
+                west update
+                west zephyr-export
+              fi
+              shields="
+                keychron_v6_ultra_ansi keychron_q6_ultra_ansi
+                keychron_v5_ultra_ansi keychron_v10_ultra_ansi
+                keychron_v3_ultra_ansi keychron_q3_ultra_ansi
+                keychron_v1_ultra_jis keychron_v1_ultra_iso
+                keychron_v1_ultra_ansi keychron_q1_ultra_ansi
+                keychron_z270_ultra_ansi keychron_v2_ultra_ansi
+                keychron_v0_ultra_ansi
+              "
+              built=""; failed=""
+              for s in $shields; do
+                echo "::group::build $s"
+                if west build -s app -p -b keychron -d app/build -- -DSHIELD="$s"; then
+                  cp app/build/zephyr/zmk.bin "dist/$s.bin"
+                  built="$built $s"
+                else
+                  echo "BUILD FAILED: $s"; failed="$failed $s"
+                fi
+                echo "::endgroup::"
+              done
+              echo "== built:$built"
+              echo "== failed:$failed"
+              ls -l dist
+              [ -n "$built" ] || { echo "no shields built"; exit 1; }
+            '
+
+      - name: Upload firmware artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: keychron-ultra-firmware
+          path: dist/*.bin
+          if-no-files-found: error
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download firmware
+        uses: actions/download-artifact@v4
+        with:
+          name: keychron-ultra-firmware
+          path: dist
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.bin
+          generate_release_notes: true
