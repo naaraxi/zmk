@@ -13,6 +13,7 @@
 #endif
 
 #include <zmk/leds.h>
+#include <zmk/usb.h>
 
 #ifdef CONFIG_KEYCHRON_RGB_ENABLE
 uint8_t rgb_regions[RGB_MATRIX_LED_COUNT];
@@ -125,10 +126,45 @@ void zmk_rgb_matrix_openrgb_enter(void) {
         // Snapshot the current onboard lighting so we can restore it on hand-back.
         openrgb_saved_config = rgb_matrix_config;
         rgb_openrgb_direct = true;
-        // Keep the LEDs powered; leave mode untouched so the effect-transition
-        // machinery isn't triggered (render is bypassed anyway).
-        rgb_matrix_config.enable = 1;
     }
+
+    // Keep the LEDs powered; leave mode untouched so the effect-transition
+    // machinery isn't triggered (render is bypassed anyway).
+    //
+    // Both lines below must run on EVERY enter, not just the first one, so that
+    // direct mode survives the host suspending and resuming:
+    //   - On USB suspend, rgb_underglow_event_listener() calls
+    //     zmk_rgb_matrix_off(), which zeroes rgb_matrix_config.enable *and*
+    //     does k_sem_reset(&thread_wait_sem).
+    //   - The RGB thread then hits its disabled check, calls zmk_rgb_sleep() to
+    //     put the LED driver to sleep, and parks in
+    //     k_sem_take(&thread_wait_sem, K_FOREVER).
+    //   - Nothing on the resume path reliably calls zmk_rgb_matrix_on() again
+    //     (that listener's USB branch is gated on rgb_onoff_status and
+    //     usb_configured), so the thread stays blocked forever. The raw-HID
+    //     thread is separate and keeps answering GET_LED_COUNT, and set_leds
+    //     keeps filling the colour buffer, but nothing ever flushes it and the
+    //     driver stays asleep - the LEDs are dark and even the onboard effects
+    //     do not run. Measured: only a power cycle recovered it; a USB bus
+    //     reset (USBDEVFS_RESET) did not.
+    //
+    // Setting .enable on its own is NOT enough - it does not wake a thread that
+    // is already blocked on the semaphore. k_sem_give is harmless when the
+    // thread is running, since thread_wait_sem is defined with a max count of 1
+    // so repeated gives saturate.
+    //
+    // Gate on USB not being suspended, or we resurrect the LEDs during host
+    // sleep: a keepalive packet that lands after zmk_rgb_matrix_off() but before
+    // the RGB thread reaches its parking branch would re-enable and re-arm the
+    // thread, and nothing would switch it off again because the USB state change
+    // that triggered off() has already been handled. The keyboard would then stay
+    // lit for the whole time the host is asleep. Once the host resumes, the bus is
+    // active again by definition (a packet arrived), so recovery still works.
+    if (zmk_usb_get_status() != USB_DC_SUSPEND) {
+        rgb_matrix_config.enable = 1;
+        enable_rgb_thread();
+    }
+
     k_work_reschedule(&openrgb_handback_work, K_MSEC(OPENRGB_HANDBACK_MS));
 }
 
