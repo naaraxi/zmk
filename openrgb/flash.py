@@ -48,6 +48,71 @@ def build(opcode, data=b""):
     pkt += bytes([s & 0xFF, (s >> 8) & 0xFF])
     return pkt
 
+def keychron_hidraw_nodes():
+    """Every hidraw node belonging to the keyboard, not just the DFU one."""
+    nodes = []
+    for path in sorted(glob.glob("/sys/class/hidraw/hidraw*")):
+        try:
+            uevent = open(f"{path}/device/uevent").read().upper()
+        except OSError:
+            continue
+        if "3434" in uevent and "0C60" in uevent:
+            nodes.append("/dev/" + os.path.basename(path))
+    return nodes
+
+def processes_holding(nodes):
+    """[(pid, comm, node)] for other processes holding any of these nodes open."""
+    holders, me = [], os.getpid()
+    for fddir in glob.glob("/proc/[0-9]*/fd"):
+        try:
+            pid = int(fddir.split("/")[2])
+        except (IndexError, ValueError):
+            continue
+        if pid == me:
+            continue
+        try:
+            fds = os.listdir(fddir)
+        except OSError:
+            continue                          # exited, or not ours to inspect
+        for fd in fds:
+            try:
+                target = os.readlink(os.path.join(fddir, fd))
+            except OSError:
+                continue
+            if target in nodes:
+                try:
+                    comm = open(f"/proc/{pid}/comm").read().strip()
+                except OSError:
+                    comm = "?"
+                holders.append((pid, comm, target))
+    return holders
+
+def preflight(force=False):
+    """Refuse to flash while something else is talking to the keyboard.
+
+    A flash attempted while OpenRGB and Artemis were streaming to the raw-HID
+    interface died with a bare "no ack at chunk 5665/19014": the firmware was too
+    busy servicing that traffic to ack DFU packets. The same image flashed cleanly
+    with nothing else attached. That failure gives no hint of its cause, so check
+    up front instead of finding out 5000 chunks in.
+    """
+    holders = processes_holding(keychron_hidraw_nodes())
+    if not holders:
+        return True
+
+    print("!! another process is talking to the keyboard:")
+    for pid, comm, node in sorted(set(holders)):
+        print(f"     pid {pid:>7}  {comm:<20} {node}")
+    print("   Flashing while it streams starves the DFU acks, and the upload dies")
+    print("   partway through with a bare 'no ack at chunk N'.")
+    print("   Stop it first:  systemctl --user stop artemis openrgb")
+    print("   ...or flash from a machine that is not driving this keyboard.")
+    if force:
+        print("   --force given, continuing anyway.")
+        return True
+    print("   Refusing to start. Pass --force to override.")
+    return False
+
 def find_dfu_hidraw():
     """Return /dev/hidrawX whose report descriptor declares usage page 0x8C."""
     for path in sorted(glob.glob("/sys/class/hidraw/hidraw*")):
@@ -139,7 +204,15 @@ def flash(d, image):
     return True
 
 def main():
-    mode = sys.argv[1] if len(sys.argv) > 1 else "handshake"
+    force = "--force" in sys.argv
+    args = [a for a in sys.argv[1:] if not a.startswith("-")]
+    mode = args[0] if args else "handshake"
+
+    # Checked before opening the DFU node so the advice lands even if the DFU
+    # interface is missing. handshake is read-only, so it is exempt.
+    if mode == "flash" and not preflight(force):
+        sys.exit(1)
+
     dev = find_dfu_hidraw()
     if not dev:
         print("!! DFU HID interface (usage 0x8C) not found. Keyboard connected & wired?"); sys.exit(2)
@@ -150,12 +223,14 @@ def main():
             ok = handshake(d)
             sys.exit(0 if ok else 1)
         elif mode == "flash":
+            if len(args) < 2:
+                print("usage: flash.py flash <image.bin> [--force]"); sys.exit(2)
             if not handshake(d):
                 print("!! handshake failed — aborting before any write."); sys.exit(1)
-            ok = flash(d, sys.argv[2])
+            ok = flash(d, args[1])
             sys.exit(0 if ok else 1)
         else:
-            print("usage: flash.py [handshake | flash <image.bin>]"); sys.exit(2)
+            print("usage: flash.py [handshake | flash <image.bin> [--force]]"); sys.exit(2)
     finally:
         d.close()
 
