@@ -27,6 +27,9 @@ concurrency:
 
 jobs:
   deploy:
+    # workflow_run fires on any completion, failure and cancelled included, so
+    # without this a broken release build would still redeploy the page.
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}

@@ -55,7 +55,10 @@ jobs:
               echo "== built:$built"
               echo "== failed:$failed"
               ls -l dist
-              [ -n "$built" ] || { echo "no shields built"; exit 1; }
+              # Fail the job on ANY broken shield. Tolerating them would publish a
+              # release that is quietly missing a board, on a green run.
+              [ -n "$built" ] || { echo "::error::no shields built"; exit 1; }
+              [ -z "$failed" ] || { echo "::error::shields failed to build:$failed"; exit 1; }
             '
 
       - name: Upload firmware artifacts
