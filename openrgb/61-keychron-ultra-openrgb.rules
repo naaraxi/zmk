@@ -1,0 +1,15 @@
+# Let the person logged in at the machine talk to Keychron keyboards over raw HID.
+#
+# Optional. Without it, flash.py and openrgb_test.py still work if you run them
+# with sudo. The rule saves you doing that, and it lets OpenRGB reach the
+# keyboard while running as your normal user.
+#
+# This matches every Keychron device rather than one model, so it keeps working
+# if you switch boards. Each Ultra model reports a different product id.
+#
+# Install:
+#   sudo cp openrgb/61-keychron-ultra-openrgb.rules /etc/udev/rules.d/
+#   sudo udevadm control --reload-rules && sudo udevadm trigger
+# Then unplug and replug the keyboard.
+
+SUBSYSTEMS=="usb|hidraw", ATTRS{idVendor}=="3434", TAG+="uaccess"

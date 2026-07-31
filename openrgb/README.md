@@ -41,13 +41,17 @@ OTA-flashable image with the same header format as Keychron's CDN firmware
 
 ## Flash
 The Keychron Launcher only flashes *official* images, so use the included host
-flasher (Realtek SC-FWU over `/dev/hidraw`, needs root). Plug the keyboard in
-via USB:
+flasher (Realtek SC-FWU over `/dev/hidraw`). It finds your keyboard on its own
+and works on any Ultra board. Plug the keyboard in via USB:
 
 ```bash
 sudo ./openrgb/flash.py handshake                       # read-only: identify only
 sudo ./openrgb/flash.py flash openrgb/output/keychron_v6_ultra_ansi.bin
 ```
+
+If you have two Keychron boards plugged in, it will stop and ask which one, so
+it cannot flash the wrong keyboard by accident. Pass `--device=/dev/hidrawN` to
+choose.
 
 Flashing is **brick-safe**: the image is staged to a separate "OTA Tmp" bank and
 only activated after the device verifies its CRC - an interrupted or bad flash
@@ -60,16 +64,26 @@ without installing OpenRGB. It works on any Ultra board, because it asks the
 keyboard how many LEDs it has instead of assuming.
 
 ```bash
-./openrgb/openrgb_test.py count    # just asks the LED count, nothing lights up
-./openrgb/openrgb_test.py demo     # cycles red/green/blue/white across all keys
-./openrgb/openrgb_test.py hold     # holds one color for a while
+sudo ./openrgb/openrgb_test.py count    # just asks the LED count, nothing lights up
+sudo ./openrgb/openrgb_test.py demo     # cycles red/green/blue/white across all keys
+sudo ./openrgb/openrgb_test.py hold     # holds one color for a while
 ```
 
 If `count` gets an answer, the OpenRGB firmware is running. Stock firmware does
 not know the command and replies `0xFF`.
 
-These need permission to talk to the keyboard. The udev rule that comes with the
-OpenRGB plugin gives your login that permission. Without it, add `sudo`.
+## Running without sudo (optional)
+Both scripts talk to `/dev/hidraw`, which normally only root can open. If you
+would rather not use `sudo` every time, install the udev rule included here:
+
+```bash
+sudo cp openrgb/61-keychron-ultra-openrgb.rules /etc/udev/rules.d/
+sudo udevadm control --reload-rules && sudo udevadm trigger
+```
+
+Then unplug and replug the keyboard. This is optional - `sudo` works fine
+without it. The same rule also lets OpenRGB reach the keyboard while running as
+your normal user.
 
 ## Keeping up with upstream
 ```bash

@@ -7,11 +7,11 @@ id_openrgb (0x16) command. Proves our firmware is running (stock ignores 0x16)
 and drives the per-key LEDs directly. Works on any Ultra board: the LED count
 comes from the device, it is not assumed.
 
-Needs access to the keyboard's hidraw node. The udev rule that ships with the
-OpenRGB plugin gives your login that access; without it, run these with sudo.
+Needs permission to open /dev/hidraw: either run it with sudo, or install the
+udev rule next to this script (61-keychron-ultra-openrgb.rules).
 
-  ./openrgb_test.py count        # GET_LED_COUNT - proof of firmware (no visible change)
-  ./openrgb_test.py demo         # enter direct mode, cycle R/G/B for ~30s, hand back
+  sudo ./openrgb_test.py count   # GET_LED_COUNT - proof of firmware (no visible change)
+  sudo ./openrgb_test.py demo    # enter direct mode, cycle R/G/B for ~30s, hand back
 """
 import os, sys, glob, select, time
 
@@ -22,19 +22,27 @@ SUB_SET_DIRECT = 0x02
 SUB_SET_LEDS = 0x03
 EPSIZE = 32
 MAX_LEDS = 1024                # sanity ceiling only; real boards are far below this
+VENDOR_ID = 0x3434             # Keychron; product id differs per model
 
 def find_cmd_hidraw():
+    # Matched by vendor id plus the 0xFF60 usage page. The product id is not
+    # checked: every Ultra model has its own, and the usage page already picks
+    # out the right interface on whichever board is plugged in.
+    found = []
     for path in sorted(glob.glob("/sys/class/hidraw/hidraw*")):
         try:
             ue = open(f"{path}/device/uevent").read().upper()
-            if "3434" not in ue or "0C60" not in ue:
+            if f"{VENDOR_ID:04X}" not in ue:
                 continue
             rd = open(f"{path}/device/report_descriptor", "rb").read()
             if b"\x06\x60\xff" in rd:          # USAGE_PAGE 0xFF60 (VIA/launcher raw)
-                return "/dev/" + os.path.basename(path)
+                found.append("/dev/" + os.path.basename(path))
         except OSError:
             continue
-    return None
+    if len(found) > 1:
+        print(f"   note: several Keychron boards attached, using {found[0]} "
+              f"(also saw {', '.join(found[1:])})")
+    return found[0] if found else None
 
 class Cmd:
     def __init__(self, dev):

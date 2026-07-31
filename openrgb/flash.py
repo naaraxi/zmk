@@ -1,11 +1,15 @@
 #!/usr/bin/env python3
 """
-Keychron V6 Ultra 8K — custom firmware flasher (Realtek SC-FWU over HID).
+Keychron Ultra — custom firmware flasher (Realtek SC-FWU over HID).
 
 Faithful port of the Keychron Launcher's Realtek OTA routine, extracted from
 the Launcher JS + the device-side app/src/dfu/tdfu.c. Talks the DFU HID
 interface (usage page 0x8C, OUT report 0xB2 / IN report 0xB1) directly over
-/dev/hidraw (needs root).
+/dev/hidraw. Finds the keyboard by vendor id and that usage page, so it works
+on any Ultra board.
+
+Needs permission to open /dev/hidraw: either run it with sudo, or install the
+udev rule next to this script (61-keychron-ultra-openrgb.rules).
 
 SAFETY: the device stages the image to the "OTA Tmp" bank and only activates on
 IMAGE_SWITCH *after* VERIFY_CRC32 succeeds. This script ABORTS before
@@ -15,6 +19,7 @@ running firmware is untouched until a verified image is switched in.
 Usage:
   sudo ./flash.py handshake                 # read-only: identify + query (NO write)
   sudo ./flash.py flash <image.bin>         # full flash (START->SEND->VERIFY->SWITCH)
+  ... --device=/dev/hidrawN                 # only if two Keychron boards are attached
 """
 import os, sys, glob, select, time
 
@@ -29,6 +34,7 @@ OP_START = 0x63
 OP_SEND_BIN = 0x64
 OP_VERIFY_CRC32 = 0x65
 OP_IMAGE_SWITCH = 0x66
+VENDOR_ID = 0x3434                   # Keychron; product id differs per model
 
 # Every Ultra shield the release CI builds, keyed by the model string the device
 # reports. Values are each shield's CONFIG_KEYCHRON_FWU_STRING_NAME.
@@ -73,7 +79,9 @@ def keychron_hidraw_nodes():
             uevent = open(f"{path}/device/uevent").read().upper()
         except OSError:
             continue
-        if "3434" in uevent and "0C60" in uevent:
+        # Vendor only. Every Ultra model has its own product id, so matching one
+        # would limit this to a single board.
+        if f"{VENDOR_ID:04X}" in uevent:
             nodes.append("/dev/" + os.path.basename(path))
     return nodes
 
@@ -131,19 +139,25 @@ def preflight(force=False):
     return False
 
 def find_dfu_hidraw():
-    """Return /dev/hidrawX whose report descriptor declares usage page 0x8C."""
+    """Every Keychron hidraw node whose report descriptor declares usage page 0x8C.
+
+    Matched by vendor id plus that usage page. The product id is deliberately not
+    checked: each Ultra model has its own, and the usage page already picks out
+    the DFU interface on whichever board is plugged in.
+    """
+    found = []
     for path in sorted(glob.glob("/sys/class/hidraw/hidraw*")):
         node = os.path.basename(path)
         try:
-            uevent = open(f"{path}/device/uevent").read()
-            if "3434" not in uevent.upper() or "0C60" not in uevent.upper():
+            uevent = open(f"{path}/device/uevent").read().upper()
+            if f"{VENDOR_ID:04X}" not in uevent:
                 continue
             rd = open(f"{path}/device/report_descriptor", "rb").read()
             if b"\x05\x8c" in rd:                # USAGE_PAGE 0x8C (DFU)
-                return f"/dev/{node}"
+                found.append(f"/dev/{node}")
         except OSError:
             continue
-    return None
+    return found
 
 class Dfu:
     def __init__(self, dev):
@@ -257,8 +271,30 @@ def flash(d, image):
     print("   switch command sent.")
     return True
 
+def pick_device(chosen):
+    """The one DFU interface to talk to, or exit with advice."""
+    found = find_dfu_hidraw()
+    if chosen:
+        if chosen not in found:
+            print(f"!! {chosen} is not a Keychron DFU interface. Found: {', '.join(found) or 'none'}")
+            sys.exit(2)
+        return chosen
+    if not found:
+        print("!! DFU HID interface (usage 0x8C) not found. Keyboard connected & wired?")
+        print("   If it is plugged in, you may just need root: try sudo.")
+        sys.exit(2)
+    if len(found) > 1:
+        # Two Keychron boards attached. Guessing could flash the wrong one, so ask.
+        print("!! more than one Keychron DFU interface found:")
+        for n in found:
+            print(f"     {n}")
+        print("   Pick one with --device=/dev/hidrawN, or unplug the other keyboard.")
+        sys.exit(2)
+    return found[0]
+
 def main():
     force = "--force" in sys.argv
+    chosen = next((a.split("=", 1)[1] for a in sys.argv[1:] if a.startswith("--device=")), None)
     args = [a for a in sys.argv[1:] if not a.startswith("-")]
     mode = args[0] if args else "handshake"
 
@@ -267,9 +303,7 @@ def main():
     if mode == "flash" and not preflight(force):
         sys.exit(1)
 
-    dev = find_dfu_hidraw()
-    if not dev:
-        print("!! DFU HID interface (usage 0x8C) not found. Keyboard connected & wired?"); sys.exit(2)
+    dev = pick_device(chosen)
     print(f"DFU interface: {dev}")
     d = Dfu(dev)
     try:
