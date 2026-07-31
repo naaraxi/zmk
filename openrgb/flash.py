@@ -132,6 +132,7 @@ class Dfu:
     def __init__(self, dev):
         self.fd = os.open(dev, os.O_RDWR)
         self.sn = 0
+        self._drain()
     def _write(self, pkt, sn):
         pkt = bytearray(pkt); pkt[4] = sn
         report = bytes([OUT_REPORT_ID]) + bytes(pkt) + b"\x00" * (REPORT_LEN - len(pkt))
@@ -141,9 +142,29 @@ class Dfu:
         if not r:
             return None
         return os.read(self.fd, REPORT_LEN + 1)   # [0xB1] + payload
+    def _drain(self):
+        """Discard reports left over from an earlier command or run."""
+        while True:
+            r, _, _ = select.select([self.fd], [], [], 0)
+            if not r:
+                return
+            os.read(self.fd, REPORT_LEN + 1)
     def cmd(self, opcode, data=b"", sn=0, timeout=1.0):
+        # GET_MODEL_INFO's ack spans two input reports, so taking the next
+        # report desyncs every later read. Match our sn (byte 7) and opcode
+        # (byte 8) instead.
         self._write(build(opcode, data), sn)
-        return self._read(timeout)
+        deadline = time.monotonic() + timeout
+        while True:
+            left = deadline - time.monotonic()
+            if left <= 0:
+                return None
+            resp = self._read(left)
+            if resp is None:
+                return None
+            if (len(resp) > 9 and resp[0] == IN_REPORT_ID
+                    and resp[7] == sn and resp[8] == opcode):
+                return resp
     def close(self):
         os.close(self.fd)
 
