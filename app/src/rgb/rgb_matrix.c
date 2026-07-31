@@ -171,8 +171,16 @@ void zmk_rgb_matrix_openrgb_enter(void) {
 void zmk_rgb_matrix_openrgb_exit(void) {
     if (rgb_openrgb_direct) {
         rgb_openrgb_direct = false;
-        // Graceful hand-back: restore the exact onboard effect/color/brightness.
+        // Restore the onboard effect/color/brightness, but leave .enable alone.
+        // It has to keep matching what the RGB thread is really doing. Setting it
+        // to 1 while the thread is parked (where a USB suspend leaves it) makes
+        // the resume path skip switching the LEDs back on: auto_state() returns
+        // early when .enable already equals the state it wants, so
+        // zmk_rgb_matrix_on() never runs, the thread is never given its
+        // semaphore, and the keyboard stays dark until it is replugged.
+        uint8_t was_enabled = rgb_matrix_config.enable;
         rgb_matrix_config = openrgb_saved_config;
+        rgb_matrix_config.enable = was_enabled;
         rgb_last_effect = 0; // force the restored effect to re-init cleanly
     }
     k_work_cancel_delayable(&openrgb_handback_work);
