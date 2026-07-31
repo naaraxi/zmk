@@ -321,8 +321,13 @@ static void zmk_rgb_task_render(uint8_t effect) {
     bool rendering = false;
 
     // OpenRGB direct mode: the host owns the LED buffer. Skip all effect
-    // rendering so its colors persist, and just flush what it set. Suspend
-    // still wins (LEDs off on sleep to save battery).
+    // rendering so its colors persist, and just flush what it set.
+    //
+    // suspend_state is always false - nothing calls
+    // zmk_rgb_matrix_set_suspend_state(). What actually darkens the LEDs on host
+    // sleep is the USB listener calling zmk_rgb_matrix_off(), which zeroes
+    // .enable and parks the RGB thread. The check stays in case that setter is
+    // ever wired up.
     if (rgb_openrgb_direct && !suspend_state) {
         rgb_task_state = RGB_STATE_FLUSH;
         return;
