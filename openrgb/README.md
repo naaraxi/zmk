@@ -55,13 +55,21 @@ leaves the running firmware untouched. Recovery: the official 1.0.2 image is
 still on Keychron's CDN and can be reflashed via the Launcher.
 
 ## Test
-`openrgb_test.py` talks the 0x16 command directly (no OpenRGB needed):
+`openrgb_test.py` talks to the keyboard directly, so you can check the firmware
+without installing OpenRGB. It works on any Ultra board, because it asks the
+keyboard how many LEDs it has instead of assuming.
 
 ```bash
-sudo ./openrgb/openrgb_test.py count    # GET_LED_COUNT (108 == OpenRGB firmware present)
-sudo ./openrgb/openrgb_test.py demo     # cycle R/G/B/white across all keys
-sudo ./openrgb/openrgb_test.py hold     # hold a color (exercises the keepalive)
+./openrgb/openrgb_test.py count    # just asks the LED count, nothing lights up
+./openrgb/openrgb_test.py demo     # cycles red/green/blue/white across all keys
+./openrgb/openrgb_test.py hold     # holds one color for a while
 ```
+
+If `count` gets an answer, the OpenRGB firmware is running. Stock firmware does
+not know the command and replies `0xFF`.
+
+These need permission to talk to the keyboard. The udev rule that comes with the
+OpenRGB plugin gives your login that permission. Without it, add `sudo`.
 
 ## Keeping up with upstream
 ```bash
