@@ -192,6 +192,11 @@ def parse_model(resp):
     payload = resp[10:]                            # skip report id(1)+header(9)
     return payload
 
+def ack_status(resp):
+    """Device-reported status, 0 = ok. ack_fail() reuses the success rsp_cmd, so
+    this byte is the only place a refused command shows up."""
+    return None if not resp else resp[9]
+
 def handshake(d):
     print(">> GET_MODEL_INFO (0x60)...")
     r = d.cmd(OP_GET_MODEL_INFO, sn=1)
@@ -218,6 +223,8 @@ def flash(d, image):
     print(">> START (0x63) sn=3 ..."); r = d.cmd(OP_START, b"\x00", sn=3)
     if not r or parse_model(r) is None:
         print("!! START not acked"); return False
+    if ack_status(r):
+        print(f"!! START rejected by device (status={ack_status(r)}) — not uploading."); return False
     sn = 4
     total = (len(data) + CHUNK - 1) // CHUNK
     for i in range(0, len(data), CHUNK):
@@ -225,6 +232,10 @@ def flash(d, image):
         r = d.cmd(OP_SEND_BIN, chunk, sn=sn)
         if not r:
             print(f"!! no ack at chunk {i//CHUNK}/{total} (sn={sn})"); return False
+        if ack_status(r):
+            print(f"!! chunk {i//CHUNK}/{total} refused by device "
+                  f"(status={ack_status(r)}, sn={sn}) — usually means START never took.")
+            return False
         sn += 1
         if sn > 255: sn = 1
         if (i // CHUNK) % 256 == 0:
@@ -234,8 +245,11 @@ def flash(d, image):
     vdata = crc.to_bytes(4, "little") * 2          # ciphertext crc + plaintext crc (both = crc)
     r = d.cmd(OP_VERIFY_CRC32, vdata, sn=sn, timeout=3.0); sn = sn + 1 if sn < 255 else 1
     p = parse_model(r)
-    if not p or p[0] != 0:
-        print(f"!! CRC VERIFY FAILED (status={p[0] if p else 'none'}) — NOT switching. Running fw is untouched.")
+    # Two different bytes: ack_status is the transport-level verdict, p[0] is the
+    # CRC result the verify handler writes into the payload.
+    if not p or ack_status(r) or p[0] != 0:
+        print(f"!! CRC VERIFY FAILED (ack_status={ack_status(r)}, "
+              f"crc_result={p[0] if p else 'none'}) — NOT switching. Running fw is untouched.")
         return False
     print("   CRC verified OK by device.")
     print(">> IMAGE_SWITCH (0x66) — device will reboot into the new image ...")

@@ -323,6 +323,9 @@ createApp({
         phase.value = 'Start';
         r = await cmd(OP.START, [0x00], 3);
         if (!r) throw new Error('START not acked');
+        // ack_fail reuses the success rsp_cmd, so ack_status (byte 8) is the only
+        // place a refused command shows up.
+        if (r[8]) throw new Error(`START rejected by device (status=${r[8]}) - not uploading`);
 
         phase.value = 'Uploading';
         let sn = 4;
@@ -332,13 +335,15 @@ createApp({
           const chunk = data.slice(i, i + CHUNK);
           const ack = await cmd(OP.SEND_BIN, chunk, sn);
           if (!ack) throw new Error(`no ack at chunk ${c}/${total} (sn=${sn})`);
+          // Must come before the CRC compare below: a refused chunk carries a
+          // zeroed payload, which would otherwise look like a data mismatch.
+          if (ack[8]) throw new Error(`chunk ${c}/${total} refused by device (status=${ack[8]}, sn=${sn}) - usually means START never took`);
 
           // The device echoes its running CRC in the SEND_BIN ack (payload bytes
           // 9..12, LE). Compare it to what we expect to catch the exact chunk
           // where the keyboard's received data diverges from what we sent.
           running = crc32step(running, chunk);
           const devCrc = (ack[10] | (ack[11] << 8) | (ack[12] << 16) | (ack[13] << 24)) >>> 0;
-          if (c === 0) log(`chunk 0 ack: ${Array.from(ack.slice(0, 16)).map(b => b.toString(16).padStart(2,'0')).join(' ')}`);
           if (devCrc !== running) {
             throw new Error(`data mismatch at chunk ${c} (sn=${sn}): device running CRC ${hex8(devCrc)} != expected ${hex8(running)} - the keyboard received different bytes than were sent`);
           }
@@ -354,7 +359,9 @@ createApp({
         vdata.copyWithin(4, 0, 4);   // plaintext crc = ciphertext crc
         r = await cmd(OP.VERIFY, vdata, sn, 3000);
         sn = sn >= 255 ? 1 : sn + 1;
-        if (!r || r[9] !== 0) throw new Error(`CRC verify failed (status=${r ? r[9] : 'none'}) - NOT switching, current firmware untouched`);
+        // Two different bytes: r[8] is the transport-level verdict, r[9] is the CRC
+        // result the verify handler writes into the payload.
+        if (!r || r[8] || r[9] !== 0) throw new Error(`CRC verify failed (ack_status=${r ? r[8] : 'none'}, crc_result=${r ? r[9] : 'none'}) - NOT switching, current firmware untouched`);
         log('CRC verified OK by device.');
 
         phase.value = 'Switching image';
