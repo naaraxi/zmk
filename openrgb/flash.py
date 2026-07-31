@@ -29,7 +29,24 @@ OP_START = 0x63
 OP_SEND_BIN = 0x64
 OP_VERIFY_CRC32 = 0x65
 OP_IMAGE_SWITCH = 0x66
-FWU_NAME = b"KCZKV68K"
+
+# Every Ultra shield the release CI builds, keyed by the model string the device
+# reports. Values are each shield's CONFIG_KEYCHRON_FWU_STRING_NAME.
+KNOWN_MODELS = {
+    b"KCZKV08K": "V0 Ultra 8K - ANSI",
+    b"KCZKV18K": "V1 Ultra 8K - ANSI",
+    b"KCZKV18I": "V1 Ultra 8K - ISO",
+    b"KCZKV18J": "V1 Ultra 8K - JIS",
+    b"KCZKV28K": "V2 Ultra 8K - ANSI",
+    b"KCZKV38K": "V3 Ultra 8K - ANSI",
+    b"KCZKV58K": "V5 Ultra 8K - ANSI",
+    b"KCZKV68K": "V6 Ultra 8K - ANSI",
+    b"KCZKVA8K": "V10 Ultra 8K - ANSI",
+    b"KCZKQ18K": "Q1 Ultra 8K - ANSI",
+    b"KCZKQ38K": "Q3 Ultra 8K - ANSI",
+    b"KCZKQ68K": "Q6 Ultra 8K - ANSI",
+    b"KCZ270U":  "Z2-70 Ultra 8K - ANSI",
+}
 
 def crc32_rtk(buf, crc=0xFFFFFFFF):
     # Matches tdfu.c CRC32(): reflected, poly 0xEDB88320, init 0xFFFFFFFF, NO final xor.
@@ -188,9 +205,11 @@ def handshake(d):
     p = parse_model(r)
     if p:
         print(f"   dfu_version = {p[0]:#04x} enc_mode = {p[2]}")
-    ok = model == FWU_NAME
-    print(f"   framing/identity {'VALID (matches KCZKV68K)' if ok else 'MISMATCH'}")
-    return ok
+    if model in KNOWN_MODELS:
+        print(f"   framing/identity VALID (Keychron {KNOWN_MODELS[model]})")
+        return True
+    print(f"   framing/identity MISMATCH ({model!r} is not a known Keychron Ultra)")
+    return False
 
 def flash(d, image):
     data = open(image, "rb").read()

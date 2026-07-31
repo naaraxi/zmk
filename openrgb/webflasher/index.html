@@ -94,7 +94,7 @@
       <div class="row">
         <button class="secondary" @click="connect" :disabled="flashing">Connect &amp; identify</button>
         <span v-if="model" :class="modelOk ? 'ok' : 'muted'">
-          Detected: <strong>{{ model }}</strong>
+          Detected: <strong>{{ modelName }}</strong>
           <template v-if="fwType"> - <strong :class="fwType === 'OpenRGB' ? 'ok' : ''">{{ fwType }} firmware</strong></template>
           <template v-if="fwVersion"> ({{ fwVersion }})</template>
           <template v-if="!modelOk"> (not a recognized Keychron Ultra)</template>
@@ -138,6 +138,26 @@ const IN_REPORT_ID  = 0xb1;
 const REPORT_LEN = 32;
 const CHUNK = 16;
 const OP = { GET_MODEL:0x60, GET_DFU_VER:0x61, START:0x63, SEND_BIN:0x64, VERIFY:0x65, SWITCH:0x66 };
+
+// Every Ultra shield the release CI builds. fwu is the shield's
+// CONFIG_KEYCHRON_FWU_STRING_NAME, i.e. the model string the device reports.
+const SHIELDS = {
+  keychron_v0_ultra_ansi:   { fwu: 'KCZKV08K', name: 'V0 Ultra 8K - ANSI' },
+  keychron_v1_ultra_ansi:   { fwu: 'KCZKV18K', name: 'V1 Ultra 8K - ANSI' },
+  keychron_v1_ultra_iso:    { fwu: 'KCZKV18I', name: 'V1 Ultra 8K - ISO' },
+  keychron_v1_ultra_jis:    { fwu: 'KCZKV18J', name: 'V1 Ultra 8K - JIS' },
+  keychron_v2_ultra_ansi:   { fwu: 'KCZKV28K', name: 'V2 Ultra 8K - ANSI' },
+  keychron_v3_ultra_ansi:   { fwu: 'KCZKV38K', name: 'V3 Ultra 8K - ANSI' },
+  keychron_v5_ultra_ansi:   { fwu: 'KCZKV58K', name: 'V5 Ultra 8K - ANSI' },
+  keychron_v6_ultra_ansi:   { fwu: 'KCZKV68K', name: 'V6 Ultra 8K - ANSI' },
+  keychron_v10_ultra_ansi:  { fwu: 'KCZKVA8K', name: 'V10 Ultra 8K - ANSI' },
+  keychron_q1_ultra_ansi:   { fwu: 'KCZKQ18K', name: 'Q1 Ultra 8K - ANSI' },
+  keychron_q3_ultra_ansi:   { fwu: 'KCZKQ38K', name: 'Q3 Ultra 8K - ANSI' },
+  keychron_q6_ultra_ansi:   { fwu: 'KCZKQ68K', name: 'Q6 Ultra 8K - ANSI' },
+  keychron_z270_ultra_ansi: { fwu: 'KCZ270U',  name: 'Z2-70 Ultra 8K - ANSI' },
+};
+// Reported model string -> display name.
+const MODEL_NAMES = Object.fromEntries(Object.values(SHIELDS).map(s => [s.fwu, s.name]));
 
 // Reflected CRC32, poly 0xEDB88320, init 0xFFFFFFFF, NO final xor (matches tdfu.c / flash.py).
 function crc32step(crc, buf) {
@@ -189,12 +209,16 @@ createApp({
 
     // keychron_v6_ultra_ansi.bin -> "Keychron V6 Ultra 8K - ANSI"
     const prettyName = (n) => {
-      const m = n.replace(/\.bin$/i, '').match(/^keychron_([a-z0-9]+)_ultra_(ansi|iso|jis)$/i);
-      if (!m) return n;
-      let model = m[1].toUpperCase();
-      if (model === 'Z270') model = 'Z2-70';
-      return `Keychron ${model} Ultra 8K - ${m[2].toUpperCase()}`;
+      const s = SHIELDS[n.replace(/\.bin$/i, '').toLowerCase()];
+      return s ? `Keychron ${s.name}` : n;
     };
+
+    // Reported model string -> "Keychron V6 Ultra 8K - ANSI", or the raw string
+    // if we do not know the board.
+    const modelName = computed(() => {
+      const n = MODEL_NAMES[model.value];
+      return n ? `Keychron ${n}` : model.value;
+    });
 
     onMounted(async () => {
       if (!hidSupported.value) return;
@@ -274,10 +298,10 @@ createApp({
         const asStr = (b) => { const n = b.indexOf(0); return new TextDecoder().decode(b.slice(0, n < 0 ? b.length : n)).trim(); };
         model.value = asStr(payload.slice(0, 10));
         fwVersion.value = asStr(payload.slice(12, 22));
-        modelOk.value = /^KCZK..8K$/.test(model.value);
+        modelOk.value = Object.hasOwn(MODEL_NAMES, model.value);
         // Our fork tags the version "-o"; stock Keychron reports "-r".
         fwType.value = /-o$/.test(fwVersion.value) ? 'OpenRGB' : (fwVersion.value ? 'Stock' : '');
-        log(`Identified: ${model.value}${fwType.value ? ' - ' + fwType.value + ' firmware' : ''}${fwVersion.value ? ' (' + fwVersion.value + ')' : ''}`);
+        log(`Identified: ${modelName.value}${fwType.value ? ' - ' + fwType.value + ' firmware' : ''}${fwVersion.value ? ' (' + fwVersion.value + ')' : ''}`);
       } catch (e) {
         log('Connect failed: ' + e.message);
       }
@@ -350,7 +374,7 @@ createApp({
     watch(selectedAssetName, (v) => { if (v) loadReleaseAsset(v); });
 
     return { hidSupported, secure, releasesLoading, assets, releaseTag, selectedAssetName,
-             firmware, loadError, device, model, modelOk, fwVersion, fwType, flashing, phase, progress, logLines,
+             firmware, loadError, device, model, modelName, modelOk, fwVersion, fwType, flashing, phase, progress, logLines,
              canFlash, prettyName, onFilePick, connect, doFlash };
   }
 }).mount('#app');
